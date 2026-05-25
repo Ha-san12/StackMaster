@@ -42,5 +42,14 @@ TagManager:
   - name: Default
     uniqueID: 0
     locked: 0
+  - name: Background_Kota
+    uniqueID: 4280871533
+    locked: 0
+  - name: Base
+    uniqueID: 768788551
+    locked: 0
+  - name: FailCollider
+    uniqueID: 2484421785
+    locked: 0
   m_RenderingLayers:
   - Default
