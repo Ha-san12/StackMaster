@@ -2,6 +2,8 @@ using System.Collections;
 using UnityEngine;
 // WAJIB tambahkan ini di paling atas agar bisa restart scene lewat tombol Retry
 using UnityEngine.SceneManagement; 
+using UnityEngine.UI;       // WAJIB tambahkan ini untuk kontrol UI Slider
+using UnityEngine.Audio;    // WAJIB tambahkan ini untuk kontrol Audio Mixer
 
 public class GameManager : MonoBehaviour {
     [Header("Block Settings")]
@@ -20,6 +22,18 @@ public class GameManager : MonoBehaviour {
     [SerializeField] private GameObject panelLobby;
     [SerializeField] private GameObject panelGameOver;
     [SerializeField] private GameObject panelCredits; // Slot untuk panel credit
+    
+    // === UI PANEL SETTING & SLIDER VOLUME ===
+    [Header("UI Settings Volume Management")]
+    [SerializeField] private GameObject panelSettingObject; // Slot untuk Panel_Setting
+    [SerializeField] private Slider masterSlider;
+    [SerializeField] private Slider musicSlider;
+    [SerializeField] private Slider soundFXSlider;
+    [SerializeField] private AudioMixer audioMixer; // Slot Audio Mixer utama
+
+    // === TAMBAHAN BARU LANGKAH 4: REF AUDIO SOURCE UNTUK SFX ===
+    [Header("Audio SFX Settings")]
+    [SerializeField] private AudioSource sfxAudioSource; // Slot untuk komponen AudioSource SFX Balok
 
     private Transform currentBlock = null;
     private Rigidbody2D currentRigidbody;
@@ -42,6 +56,9 @@ public class GameManager : MonoBehaviour {
     private float currentCameraTargetY = 0f;
     private static bool isRestartingToGame = false;
     private float cameraYThreshold = 1f; 
+    
+    // === STATUS MENU SETTING ===
+    private bool isSettingsOpen = false; 
 
     private readonly Vector2[][] tetrisShapes = new Vector2[][] {
         new Vector2[] { new Vector2(-1.5f, 0f), new Vector2(-0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(1.5f, 0f) }, // I
@@ -50,7 +67,7 @@ public class GameManager : MonoBehaviour {
         new Vector2[] { new Vector2(-1f, 0f), new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(1f, 1f) }, // L
         new Vector2[] { new Vector2(-1f, 0f), new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(-1f, 1f) }, // J
         new Vector2[] { new Vector2(-1f, 0f), new Vector2(0f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f) }, // S
-        new Vector2[] { new Vector2(-1f, 1f), new Vector2(0f, 1f), new Vector2(0f, 0f), new Vector2(1f, 0f) }  // Z
+        new Vector2[] { new Vector2(-1f, 1f), new Vector2(0f, 1f), new Vector2(0f, 0f), new Vector2(1f, 0f) }   // Z
     };
 
     private readonly Color[] tetrisColors = new Color[] {
@@ -73,12 +90,16 @@ public class GameManager : MonoBehaviour {
         
         ResetHeartUI();
         
+        // === INISIALISASI SLIDER VOLUME ===
+        SetupVolumeSliders();
+        
         if (isRestartingToGame) {
             isRestartingToGame = false;
             
             if (panelGameOver != null) panelGameOver.SetActive(false);
             if (panelLobby != null) panelLobby.SetActive(false); 
             if (panelCredits != null) panelCredits.SetActive(false); 
+            if (panelSettingObject != null) panelSettingObject.SetActive(false); // Sembunyikan panel setting pas retry
             
             if (hudScoreText != null) hudScoreText.gameObject.SetActive(true);
             SetHeartsVisibility(true);
@@ -89,6 +110,7 @@ public class GameManager : MonoBehaviour {
             if (panelLobby != null) panelLobby.SetActive(true);
             if (panelGameOver != null) panelGameOver.SetActive(false);
             if (panelCredits != null) panelCredits.SetActive(false);
+            if (panelSettingObject != null) panelSettingObject.SetActive(false); // Sembunyikan panel setting di lobby awal
             
             if (hudScoreText != null) hudScoreText.gameObject.SetActive(false);
             SetHeartsVisibility(false);
@@ -106,11 +128,13 @@ public class GameManager : MonoBehaviour {
     }
 
     public void RestartGame() {
+        Time.timeScale = 1f; // Pastikan waktu kembali normal sebelum reload scene
         isRestartingToGame = true;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name); 
     }
 
     public void GoToMainMenu() {
+        Time.timeScale = 1f; // Pastikan waktu kembali normal sebelum reload scene
         isRestartingToGame = false;
         SceneManager.LoadScene(SceneManager.GetActiveScene().name); 
     }
@@ -183,6 +207,17 @@ public class GameManager : MonoBehaviour {
     }
 
     void Update() {
+        // === DETEKSI TOMBOL ESCAPE UNTUK BUKA/TUTUP SETTING ===
+        if (Input.GetKeyDown(KeyCode.Escape)) {
+            // Hanya izinkan buka setting jika panel game over dan panel credits sedang tidak aktif
+            if ((panelGameOver == null || !panelGameOver.activeSelf) && (panelCredits == null || !panelCredits.activeSelf)) {
+                ToggleSettingsMenu();
+            }
+        }
+
+        // PENGAMAN: Jika menu setting terbuka, kunci semua pergerakan balok dan input spasi!
+        if (isSettingsOpen) return;
+
         if (currentBlock && playing) {
             float moveAmount = Time.deltaTime * blockSpeed * blockDirection;
             currentBlock.position += new Vector3(moveAmount, 0, 0);
@@ -196,6 +231,11 @@ public class GameManager : MonoBehaviour {
                 currentBlock = null; 
                 currentRigidbody.simulated = true; 
                 
+                // === TAMBAHAN BARU LANGKAH 4: PUTAR SUARA SFX JATUH SAAT TEKAN SPASI ===
+                if (sfxAudioSource != null) {
+                    sfxAudioSource.Play();
+                }
+                
                 currentScore += 10;
                 if (hudScoreText != null) {
                     hudScoreText.text = $"{currentScore}";
@@ -204,14 +244,14 @@ public class GameManager : MonoBehaviour {
                 StartCoroutine(DelayedSpawn()); 
             }
         }
-
-        if (Input.GetKeyDown(KeyCode.Escape)) {
-            SceneManager.LoadScene(0);
-        }
     }
 
     public void RemoveLife() {
         livesRemaining = Mathf.Max(livesRemaining - 1, 0); 
+
+        if (sfxAudioSource != null) {
+        sfxAudioSource.Play();
+        }
         
         if (heartImages != null && livesRemaining < heartImages.Length) {
             int heartToTurnOffIndex = livesRemaining; 
@@ -260,28 +300,79 @@ public class GameManager : MonoBehaviour {
         }
     }
 
-    // --- FUNGSI BARU: BERSIH-BERSIH TOTAL PAS KALAH ---
     private void CleanUpGameComponents() {
-        // 1. Sembunyikan Skor In-Game (Biar gak tabrakan sama skor Game Over)
         if (hudScoreText != null) {
             hudScoreText.gameObject.SetActive(false);
         }
 
-        // 2. Sembunyikan UI Health (Hati & Teks kata HEALTH)
         SetHeartsVisibility(false);
 
-        // 3. Hancurkan Balok berjalan yang belum sempat dilepas (kalau ada)
         if (currentBlock != null) {
             Destroy(currentBlock.gameObject);
             currentBlock = null;
         }
 
-        // 4. Hancurkan semua balok tumpukan yang ada di bawah langit-langit
         GameObject[] activeBlocks = GameObject.FindGameObjectsWithTag("GeneratedBlock");
         foreach (GameObject block in activeBlocks) {
             if (block != null) {
                 Destroy(block);
             }
         }
+    }
+
+    // ==========================================
+    // --- FUNGSI KHUSUS SISTEM AUDIO ---
+    // ==========================================
+
+    private void SetupVolumeSliders() {
+        if (masterSlider != null && musicSlider != null && soundFXSlider != null) {
+            // Ambil data volume yang tersimpan, jika belum ada di-set default ke 0.7f
+            masterSlider.value = PlayerPrefs.GetFloat("MasterVolume", 0.7f);
+            musicSlider.value = PlayerPrefs.GetFloat("MusicVolume", 0.7f);
+            soundFXSlider.value = PlayerPrefs.GetFloat("SoundFXVolume", 0.7f);
+
+            // Pasang fungsi pendengar perubahan nilai geser slider
+            masterSlider.onValueChanged.AddListener(SetMasterVolume);
+            musicSlider.onValueChanged.AddListener(SetMusicVolume);
+            soundFXSlider.onValueChanged.AddListener(SetSoundFXVolume);
+            
+            // Set volume awal berdasarkan PlayerPrefs saat game dimulai
+            SetMasterVolume(masterSlider.value);
+            SetMusicVolume(musicSlider.value);
+            SetSoundFXVolume(soundFXSlider.value);
+        }
+    }
+
+    public void ToggleSettingsMenu() {
+        isSettingsOpen = !isSettingsOpen;
+        
+        if (panelSettingObject != null) {
+            panelSettingObject.SetActive(isSettingsOpen);
+        }
+
+        // Efek Pause: Jika menu setting dibuka, hentikan waktu game. Jika ditutup, kembalikan ke normal.
+        Time.timeScale = isSettingsOpen ? 0f : 1f;
+    }
+
+    public void SetMasterVolume(float value) {
+        if (audioMixer != null) {
+            // Logika konversi linear slider (0.0001 ke 1) menjadi skala Desibel (-80dB ke 0dB)
+            audioMixer.SetFloat("MasterParam", Mathf.Log10(Mathf.Max(value, 0.0001f)) * 20);
+        }
+        PlayerPrefs.SetFloat("MasterVolume", value);
+    }
+
+    public void SetMusicVolume(float value) {
+        if (audioMixer != null) {
+            audioMixer.SetFloat("MusicParam", Mathf.Log10(Mathf.Max(value, 0.0001f)) * 20);
+        }
+        PlayerPrefs.SetFloat("MusicVolume", value);
+    }
+
+    public void SetSoundFXVolume(float value) {
+        if (audioMixer != null) {
+            audioMixer.SetFloat("SoundFXParam", Mathf.Log10(Mathf.Max(value, 0.0001f)) * 20);
+        }
+        PlayerPrefs.SetFloat("SoundFXVolume", value);
     }
 }
